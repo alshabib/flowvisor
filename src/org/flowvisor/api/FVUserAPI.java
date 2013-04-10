@@ -192,6 +192,62 @@ public interface FVUserAPI {
 	 */
 	public String getFloodPerm() throws PermissionDeniedException;
 	
+	
+	/**
+	 * Set the maximum rate of messages a slice can send to a switch.
+	 * 
+	 * @param sliceName - slice to apply the limit to.
+	 * @param rate - the limit
+	 * @return
+	 * @throws PermissionDeniedException
+	 */
+	
+	public boolean setRateLimit (String sliceName, String rate) 
+			throws PermissionDeniedException;
+	
+	/**
+	 * Set the maximum number of flow mods per slice per dpid.
+	 * If dpid is set to any then the global slice limit applies.
+	 * If no value is set then the number of slices is limitless.
+	 * 
+	 * @param sliceName - slice to apply the limit to.
+	 * @param dpid - dpid to apply limit to
+	 * @param maxFlowMods - the limit
+	 * @return
+	 * @throws PermissionDeniedException
+	 */
+
+	public boolean setMaximumFlowMods (String sliceName, String dpid, String maxFlowMods) 
+			throws PermissionDeniedException;
+	
+	/**
+	 * Get the maximum per slice per dpid limit.
+	 * 
+	 * 
+	 * 
+	 * @param sliceName
+	 * @param dpid
+	 * @return the limit or -1 if there is not limit.
+	 * @throws PermissionDeniedException
+	 */
+	public Integer getMaximumFlowMods (String sliceName, String dpid)
+			throws PermissionDeniedException;
+	
+	
+	/**
+	 * Get the current per slice per dpid limit.
+	 * 
+	 * 
+	 * 
+	 * @param sliceName
+	 * @param dpid
+	 * @return the limit or -1 if there is not limit.
+	 * @throws PermissionDeniedException
+	 */
+	public Integer getCurrentFlowMods(String sliceName, String dpid) 
+			throws PermissionDeniedException, SliceNotFound, DPIDNotFound;
+	
+	
 	/**
 	 * Enable/Disable flow tracking in FlowVisor
 	 * 
@@ -352,7 +408,7 @@ public interface FVUserAPI {
 	 * @param filename the file to write to.
 	 * @throws PermissionDeniedException
 	 */
-	public Boolean dumpConfig(String filename) 
+	public String dumpConfig() 
 			throws PermissionDeniedException, FileNotFoundException; 
 
 	

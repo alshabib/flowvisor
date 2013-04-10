@@ -25,6 +25,8 @@ public interface Flowvisor extends FVAppConfig {
 	public static String VERSION = "version";
 	public static String HOST = "host";
 	public static String CONFIG = "config_name";
+	public static String DB_VERSION = "db_version";
+	public static String FSCACHE = "fscache";
 	
 	// Table name
 	public static String FLOWVISOR = "flowvisor";
@@ -51,6 +53,7 @@ public interface Flowvisor extends FVAppConfig {
 	public String getLogFacility() throws ConfigError;
 	public Boolean getTopologyServer(int id) throws ConfigError;
 	public Boolean getTopologyServer() throws ConfigError;
+	public Integer getFlowStatsCache() throws ConfigError;
 	
 	
 	public void settrack_flows(Integer id, Boolean track_flows);
@@ -73,6 +76,12 @@ public interface Flowvisor extends FVAppConfig {
 	public void setAPIWSPort(Integer port) throws ConfigError;
 	public void setJettyPort(Integer id, Integer port) throws ConfigError;
 	public void setJettyPort(Integer port) throws ConfigError;
+	public void setFlowStatsCache(Integer timer) throws ConfigError;
+	
+	
+	
+	public int fetchDBVersion();
+	
 	
 	
 }

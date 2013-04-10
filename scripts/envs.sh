@@ -7,7 +7,8 @@ SSL_KEYPASSWD=CHANGEME_PASSWD
 #install_root is for installing to a new directory, e.g., for chroot()
 
 if [ -z $configbase ] ; then
-    configbase=`pwd`/`dirname $0`/..
+    configbase=`dirname $0`/..
+    #configbase=`pwd`/`dirname $0`/..
     install_dir=$configbase/dist
     jars=$configbase/lib
     config_dir=$configbase
@@ -54,6 +55,8 @@ $jars/derbytools.jar:\
 $jars/jna.jar:\
 $jars/syslog4j-0.9.46-bin.jar:\
 $jars/log4j-1.2.16.jar:\
+$jars/jsonrpc2-base-1.30.jar:\
+$jars/jsonrpc2-server-1.8.jar:\
 $install_dir/flowvisor.jar
 
 emmajar=$jars/emma/emma.jar
@@ -65,6 +68,5 @@ sslopts="-Djavax.net.ssl.keyStore=$SSL_KEYSTORE -Djavax.net.ssl.keyStorePassword
 # for ssl debugging options
 #sslopts="$sslopts -Djava.protocol.handler.pkgs=com.sun.net.ssl.internal.www.protocol -Djavax.net.debug=ssl"
 
-
-
-
+ test -f /etc/default/flowvisor && . /etc/default/flowvisor
+ test -f /etc/sysconfig/flowvisor && . /etc/sysconfig/flowvisor

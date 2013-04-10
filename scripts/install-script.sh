@@ -118,6 +118,10 @@ fi
 echo Installing FlowVisor into $root$prefix with prefix=$prefix as user/group ${fvuser}:${fvgroup}
 
 bin_SCRIPTS="\
+    fvctl-xml \
+    "
+
+bin_PYSCRIPTS="\
     fvctl \
     "
 
@@ -152,7 +156,9 @@ LIBS="\
     servlet-api-2.5.jar \
     jna.jar \
     log4j-1.2.16.jar \
-    syslog4j-0.9.46-bin.jar
+    syslog4j-0.9.46-bin.jar \
+    jsonrpc2-server-1.8.jar \
+    jsonrpc2-base-1.30.jar
     "
 
 DOCS="\
@@ -169,9 +175,13 @@ for script in $bin_SCRIPTS $sbin_SCRIPTS envs ; do
     sed -e "s!#base=PREFIX!base=$prefix!" -e "s!#configbase=PREFIX!configbase=$prefix!"< $script.sh > $script
 done
 
+for script in $bin_PYSCRIPTS; do
+    cp $script.py $script
+done
+
 echo Creating directories
 
-for d in bin sbin libexec/flowvisor etc share/man/man1 share/man/man8 share/doc/flowvisor share/db/flowvisor ; do 
+for d in bin sbin libexec/flowvisor share/man/man1 share/man/man8 share/doc/flowvisor share/db/flowvisor ; do 
     echo Creating $prefix/$d
     $install $verbose --owner=$binuser --group=$bingroup --mode=755 -d $root$prefix/$d
 done
@@ -197,6 +207,7 @@ $install $verbose --owner=$fvuser --group=$fvgroup --mode=2755 -d $root/etc/flow
 
 echo Installing scripts
 $install $verbose --owner=$binuser --group=$bingroup --mode=755 $bin_SCRIPTS $root$prefix/bin
+$install $verbose --owner=$binuser --group=$bingroup --mode=755 $bin_PYSCRIPTS $root$prefix/bin
 $install $verbose --owner=$binuser --group=$bingroup --mode=755 $sbin_SCRIPTS $root$prefix/sbin
 
 echo "Installing SYSV startup script (not enabled by default)"
@@ -254,6 +265,10 @@ echo Installing configs
 cd $owd
 $install $verbose --owner=$fvuser --group=$fvgroup --mode=644 $scriptd/envs $root/etc/flowvisor/envs.sh
 $install $verbose --owner=$fvuser --group=$fvgroup --mode=644 $scriptd/fvlog.config $root/etc/flowvisor/fvlog.config
+
+echo Installing Logrotate config
+cd $owd
+$install $verbose --mode=644 $scriptd/logrotate $root/etc/logrotate.d/flowvisor
 
 echo Installing documentation
 cd $owd

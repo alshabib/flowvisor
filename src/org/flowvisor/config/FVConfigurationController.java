@@ -1,18 +1,25 @@
 package org.flowvisor.config;
 
 import java.lang.reflect.Proxy;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 
 public class FVConfigurationController {
 
 	private ConfDBSettings settings = null;
 	private static FVConfigurationController instance = null;
-	private HashMap<Object, HashSet<ChangedListener>> listeners = null;
+	private HashMap<Object, Set<ChangedListener>> listeners = null;
+	ExecutorService executor = null;
 
 	private FVConfigurationController(ConfDBSettings settings) {
 		this.settings  = settings;
-		this.listeners = new HashMap<Object, HashSet<ChangedListener>>();
+		this.listeners = new HashMap<Object, Set<ChangedListener>>();
+		executor = Executors.newFixedThreadPool(1);
 	}
 	
 	public static FVConfigurationController instance() {
@@ -26,25 +33,38 @@ public class FVConfigurationController {
 	}
 	
 	public void addChangeListener(Object key, ChangedListener listener) {
-		HashSet<ChangedListener> list = null;
+		Set<ChangedListener> list = null;
 		if (listeners.containsKey(key))
 			list = listeners.get(key);
 		else 
-			list = new HashSet<ChangedListener>();
+			list = Collections.synchronizedSet(new HashSet<ChangedListener>());
 		list.add(listener);
 		listeners.put(key, list);
 	}
 	
 	public void removeChangeListener(Object key,
 			FlowvisorChangedListener l) {
-		HashSet<ChangedListener> list = listeners.get(key);
+		Set<ChangedListener> list = listeners.get(key);
 		if (list != null && list.contains(l)) {
 			list.remove(l);
 			listeners.put(key, list);
 		}
 	}
 	
-	public void fireChange(Object key, String method, Object value) {
+	public void fireChange(final Object key, final String method, final Object value) {
+		
+		/*FutureTask<Object> future = new FutureTask<Object>(
+                new Callable<Object>() {
+                    public Object call() {
+                    	if (!listeners.containsKey(key))
+                			return null;
+                		for (ChangedListener l : listeners.get(key)) 
+                			l.processChange(new ConfigurationEvent(method, l, value));
+                		return null;
+                    }
+                });
+        executor.execute(future);*/
+		
 		if (!listeners.containsKey(key))
 			return;
 		for (ChangedListener l : listeners.get(key)) 
@@ -61,8 +81,17 @@ public class FVConfigurationController {
 		return configProxy;
 	}
 	
+	public void execute(FutureTask<Object> future) {
+		executor.execute(future);
+	}
+	
+	public ConfDBSettings getSettings() {
+		return settings;
+	}
+	
 	public void shutdown() {
 		settings.shutdown();
+		executor.shutdown();
 	}
 
 	

@@ -2,9 +2,8 @@ package org.flowvisor.config;
 
 import java.io.IOException;
 import java.sql.Connection;
-
-import com.google.gson.stream.JsonReader;
-import com.google.gson.stream.JsonWriter;
+import java.util.ArrayList;
+import java.util.HashMap;
 
 public interface FVAppConfig {
 /*
@@ -12,13 +11,15 @@ public interface FVAppConfig {
  * It is used so that we don't have to create multiple proxies 
  * for each datatype.
  * 
- * well it's not exactly empty but whatever, the below method doesn't count.
+ * well it's not exactly empty but whatever, the below methods don't count.
  */
 	public void setSettings(ConfDBSettings settings);
 	public void close(Object o);
 	public void close(Connection conn);
 	public void notify(Object key, String method, Object newValue);
-	public void toJson(JsonWriter writer) throws IOException;
-	public void fromJson(JsonReader reader) throws IOException;
+	public HashMap<String, Object> toJson(HashMap<String,Object> output);
+	public void fromJson(ArrayList<HashMap<String, Object>> input) throws IOException;
+	
+	public void updateDB(int version);
 	
 }

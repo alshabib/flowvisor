@@ -5,6 +5,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 
@@ -13,9 +14,6 @@ import org.flowvisor.exceptions.DuplicateControllerException;
 import org.flowvisor.flows.FlowMap;
 import org.flowvisor.log.FVLog;
 import org.flowvisor.log.LogLevel;
-
-import com.google.gson.stream.JsonReader;
-import com.google.gson.stream.JsonWriter;
 
 public class SliceImpl implements Slice {
 	
@@ -27,6 +25,7 @@ public class SliceImpl implements Slice {
 	private static String FDROP = "setDropPolicy";
 	private static String FHOST = "setControllerHost";
 	private static String FPORT = "setControllerPort";
+	private static String FFMLIMIT = "setFlowModLimit";
 	
 	// STATEMENTS
 	private static String GALL = "SELECT S.*,F." + Flowvisor.CONFIG + " FROM Slice AS S, Flowvisor AS F WHERE S.flowvisor_id = F.id";
@@ -42,24 +41,32 @@ public class SliceImpl implements Slice {
 	private static String GCREATOR = "SELECT " + CREATOR + " FROM Slice WHERE " + SLICE + " = ?";
 	private static String SEMAIL = "UPDATE Slice SET " + EMAIL + " = ? WHERE " + SLICE + " = ?";
 	private static String GEMAIL = "SELECT " + EMAIL + " FROM Slice WHERE " + SLICE + " = ?";
+	private static String SFMLIMIT = "UPDATE Slice SET " + FMLIMIT + " = ? WHERE " + SLICE + " = ?";
+	private static String GFMLIMIT = "SELECT " + FMLIMIT + " FROM Slice WHERE " + SLICE + " = ?" ;
 	private static String GALLSLICE = "SELECT " + SLICE + " FROM SLICE ORDER BY id ASC";
 	private static String NAMECHECK = "SELECT id FROM Slice WHERE " + SLICE + " = ?";
 	private static String CONTCHECK = "SELECT id from Slice WHERE " + HOST + " = ? AND " + PORT + " = ?"; 
 	private static String CREATESLICE = "INSERT INTO Slice(flowvisor_id, flowmap_type, name, creator, passwd_crypt," +
-			" passwd_salt, controller_hostname, controller_port, contact_email, drop_policy, lldp_spam) " +
-			"VALUES(?,?,?,?,?,?,?,?,?,?,?)";
+			" passwd_salt, controller_hostname, controller_port, contact_email, drop_policy, lldp_spam, max_flow_rules) " +
+			"VALUES(?,?,?,?,?,?,?,?,?,?,?,?)";
 	private static String DELETESLICE = "DELETE FROM Slice WHERE " + SLICE + " = ?";
+	
+	private static String SADMINSTATUS = "UPDATE SLICE SET " + ADMINDOWN + " = ?" +
+			" WHERE " + SLICE + " = ?";
+	private static String SLICEDOWN = "SELECT " + ADMINDOWN +" FROM Slice WHERE " + SLICE + " = ?";
+	
+	
 	private static String SCRYPT = "UPDATE Slice SET " + CRYPT + " = ?, " + SALT +
 			" = ? WHERE " + SLICE + " = ?";
+	
 	
 	private static String FLOWVISOR = "SELECT id from " + Flowvisor.FLOWVISOR + " WHERE " + Flowvisor.CONFIG + " = ?"; 
 	
 
 	private ConfDBSettings settings = null;
 	
-	private SliceImpl() {}
 	
-	private static SliceImpl getInstance() {
+	public static SliceImpl getInstance() {
 		if (instance == null)
 			instance = new SliceImpl();
 		return instance;
@@ -203,6 +210,52 @@ public class SliceImpl implements Slice {
 			close(ps);
 			close(conn);	
 		}
+	}
+	
+	@Override
+	public void setMaxFlowMods(String sliceName, int limit) throws ConfigError {
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet set = null;
+		try {
+			conn = settings.getConnection();
+			ps = conn.prepareStatement(SFMLIMIT);
+			ps.setInt(1, limit);
+			ps.setString(2, sliceName);
+			if (ps.executeUpdate() == 0)
+				throw new ConfigError("Global limit for slice " + sliceName + " was not set to " + limit);
+			notify(sliceName, FFMLIMIT, limit);
+		} catch (SQLException e) {
+			FVLog.log(LogLevel.WARN, null, e.getMessage());
+		} finally {
+			close(set);
+			close(ps);
+			close(conn);
+			
+		}
+	}
+
+	@Override
+	public Integer getMaxFlowMods(String sliceName) throws ConfigError {
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet set = null;
+		try {
+			conn = settings.getConnection();
+			ps = conn.prepareStatement(GFMLIMIT);
+			ps.setString(1, sliceName);
+			set = ps.executeQuery();
+			if (set.next())
+				return set.getInt(FMLIMIT);
+		} catch (SQLException e) {
+			FVLog.log(LogLevel.WARN, null, e.getMessage());
+		} finally {
+			close(set);
+			close(ps);
+			close(conn);
+			
+		}
+		return null;
 	}
 
 	@Override
@@ -483,7 +536,8 @@ public class SliceImpl implements Slice {
 			ps = conn.prepareStatement(CONTCHECK);
 			ps.setString(1, controller_hostname);
 			ps.setInt(2, controller_port);
-			if (!ps.execute())
+			set = ps.executeQuery();
+			if (set.next())
 				throw new DuplicateControllerException(controller_hostname, controller_port, sliceName, null);
             close(conn);
 			conn = settings.getConnection();
@@ -499,6 +553,7 @@ public class SliceImpl implements Slice {
 			ps.setString(9, slice_email);
 			ps.setString(10, drop_policy);
 			ps.setBoolean(11, true);
+			ps.setInt(12, -1);
 			if (ps.executeUpdate() == 0)
 				FVLog.log(LogLevel.WARN, null, "Slice " + sliceName + " creation had no effect.");
 		} catch (SQLException e) {
@@ -510,8 +565,64 @@ public class SliceImpl implements Slice {
 			
 		}	
 	}
+	
+	
+	@Override
+	public void createSlice(String sliceName, String controller_hostname,
+			int controller_port, String drop_policy, String passwd,
+			String salt, String slice_email, String creatorSlice, boolean lldp_spam, 
+			int maxFlowMods, int flowvisor_id, int type)
+			throws DuplicateControllerException {
+		String crypt = APIAuth.makeCrypt(salt, passwd);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet set = null;
+		try {
+			conn = settings.getConnection();
+			ps = conn.prepareStatement(CONTCHECK);
+			ps.setString(1, controller_hostname);
+			ps.setInt(2, controller_port);
+			set = ps.executeQuery();
+			if (set.next())
+				throw new DuplicateControllerException(controller_hostname, controller_port, sliceName, null);
+            close(conn);
+			conn = settings.getConnection();
+			ps = conn.prepareStatement(CREATESLICE);
+			ps.setInt(1, flowvisor_id);
+			ps.setInt(2, type);
+			ps.setString(3, sliceName);
+			ps.setString(4, creatorSlice);
+			ps.setString(5, crypt);
+			ps.setString(6, salt);
+			ps.setString(7, controller_hostname);
+			ps.setInt(8, controller_port);
+			ps.setString(9, slice_email);
+			ps.setString(10, drop_policy);
+			ps.setBoolean(11, lldp_spam);
+			ps.setInt(12, maxFlowMods);
+			if (ps.executeUpdate() == 0) {
+				FVLog.log(LogLevel.WARN, null, "Slice " + sliceName + " creation had no effect.");
+				return;
+			}
+		} catch (SQLException e) {
+			FVLog.log(LogLevel.WARN, null, e.getMessage());
+		} finally {
+			close(set);
+			close(ps);
+			close(conn);
+			
+		}	
+	}
 
 	
+	@Override
+	public void deleteSlice(String sliceName, Boolean preserve) 
+			throws InvalidSliceName, ConfigError {
+		if (preserve) 
+			FlowSpaceImpl.getProxy().saveFlowSpace(sliceName);
+		deleteSlice(sliceName);
+
+	}
 	
 	@Override
 	public void deleteSlice(String sliceName) throws InvalidSliceName {
@@ -532,6 +643,48 @@ public class SliceImpl implements Slice {
 			close(conn);
 		}
 
+	}
+	
+	@Override
+	public void setAdminStatus(String sliceName, boolean status) {
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet set = null;
+		try {
+			conn = settings.getConnection();
+			ps = conn.prepareStatement(SADMINSTATUS);
+			ps.setBoolean(1, status);
+			ps.setString(2, sliceName);
+			ps.executeUpdate();
+		} catch (SQLException e) {
+			FVLog.log(LogLevel.WARN, null, e.getMessage());
+		} finally {
+			close(set);
+			close(ps);
+			close(conn);
+		}
+	}
+	 
+	@Override
+	public boolean isSliceUp(String sliceName) {
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet set = null;
+		try {
+			conn = settings.getConnection();
+			ps = conn.prepareStatement(SLICEDOWN);
+			ps.setString(1, sliceName);
+			set = ps.executeQuery();
+			if (set.next()) 
+				return set.getBoolean(ADMINDOWN);
+		} catch (SQLException e) {
+			FVLog.log(LogLevel.WARN, null, e.getMessage());
+		} finally {
+			close(set);
+			close(ps);
+			close(conn);
+		}
+		return false;
 	}
 	
 	@Override
@@ -579,37 +732,39 @@ public class SliceImpl implements Slice {
 	}
 
 	@Override
-	public void toJson(JsonWriter writer) throws IOException {
+	public HashMap<String, Object> toJson(HashMap<String, Object> output) {
 		Connection conn = null;
 		PreparedStatement ps = null;
-		ResultSet set = null;
+		ResultSet set = null;	
+		HashMap<String, Object> slice = new HashMap<String, Object>();
+		LinkedList<Object> list = new LinkedList<Object>();
+				
 		try {
 			conn = settings.getConnection();
 			ps = conn.prepareStatement(GALL);
 			set = ps.executeQuery();
-			//writer.beginObject();
-			writer.name(TSLICE);
-			writer.beginArray();
 			while (set.next()) {
-				writer.beginObject();
-				writer.name(Flowvisor.CONFIG).value(set.getString(Flowvisor.CONFIG));
-				writer.name(FMTYPE).value(FlowMap.type.values()[set.getInt(FMTYPE)].getText());
-				writer.name(SLICE).value(set.getString(SLICE));
-				writer.name(CREATOR).value(set.getString(CREATOR));
-				writer.name(CRYPT).value(set.getString(CRYPT));
-				writer.name(SALT).value(set.getString(SALT));
-				writer.name(HOST).value(set.getString(HOST));
-				writer.name(PORT).value(set.getInt(PORT));
-				writer.name(EMAIL).value(set.getString(EMAIL));
-				writer.name(DROP).value(set.getString(DROP));
-				writer.name(LLDP).value(set.getBoolean(LLDP));
-				writer.endObject();
-			}
-			writer.endArray();
-			//writer.endObject();
+				slice.put(Flowvisor.CONFIG, set.getString(Flowvisor.CONFIG));
+				slice.put(FMTYPE, FlowMap.type.values()[set.getInt(FMTYPE)].getText());
+				slice.put(SLICE, set.getString(SLICE));
+				slice.put(CREATOR, set.getString(CREATOR));
+				slice.put(CRYPT, set.getString(CRYPT));
+				slice.put(SALT, set.getString(SALT));
+				slice.put(HOST, set.getString(HOST));
+				slice.put(PORT, set.getInt(PORT));
+				slice.put(EMAIL, set.getString(EMAIL));
+				slice.put(DROP, set.getString(DROP));
+				slice.put(LLDP, set.getBoolean(LLDP));
+				slice.put(FMLIMIT, set.getInt(FMLIMIT));
+				slice.put(ADMINDOWN, set.getBoolean(ADMINDOWN));
 				
+				list.add(slice.clone());
+				slice.clear();
+				
+			}
+			output.put(TSLICE, list);	
 		} catch (SQLException e) {
-			FVLog.log(LogLevel.WARN, null, e.getMessage());
+			FVLog.log(LogLevel.WARN, null, "Failed to write slice information "  + e.getMessage());
 		} finally {
 			close(set);
 			close(ps);
@@ -617,63 +772,13 @@ public class SliceImpl implements Slice {
 			
 		}
 	
-		
+		return output;
 	}
 
 	@Override
-	public void fromJson(JsonReader reader) throws IOException {
-		HashMap<String, Object> row = new HashMap<String , Object>();
-		String key = null;
-		Object value = null;
-		while (true) {
-			switch (reader.peek()) {
-				case BEGIN_ARRAY:
-					reader.beginArray();
-					break;
-				case BEGIN_OBJECT:
-					reader.beginObject();
-					break;
-				case BOOLEAN:
-					value = reader.nextBoolean();
-					break;
-				case END_DOCUMENT:
-					throw new IOException("Unexpected EOF while parsing config file.");
-				case END_OBJECT:
-					reader.endObject();
-					insert(row);
-					row.clear();
-					key = null;
-					value = null;
-					break;
-				case END_ARRAY:
-					reader.endArray();
-					return;
-				case NAME:
-					key = reader.nextName();
-					break;
-				case NULL:
-					reader.nextNull();
-					if (key != null) {
-						row.put(key, value);
-						key = null;
-					}
-					break;
-				case NUMBER:
-					value = reader.nextLong();
-					break;
-				case STRING:
-					value = reader.nextString();
-					break;
-				default:
-					reader.skipValue();
-			}
-			if (key != null && value != null) {
-				row.put(key, value);
-				key = null;
-				value = null;
-			}
-		}
-		
+	public void fromJson(ArrayList<HashMap<String, Object>> list) throws IOException {
+		for (HashMap<String, Object> row : list)
+			insert(row);
 	}
 	
 	private void insert(HashMap<String, Object> row) throws IOException {
@@ -698,7 +803,7 @@ public class SliceImpl implements Slice {
 			ps.setString(5, (String) row.get(CRYPT));
 			ps.setString(6, (String) row.get(SALT));
 			ps.setString(7, (String) row.get(HOST));
-			ps.setInt(8, ((Long) row.get(PORT)).intValue());
+			ps.setInt(8, ((Double) row.get(PORT)).intValue());
 			ps.setString(9, (String) row.get(EMAIL));
 			if (row.get(DROP) == null)
 				row.put(DROP, "exact");
@@ -706,8 +811,18 @@ public class SliceImpl implements Slice {
 			if (row.get(LLDP) == null)
 				row.put(LLDP, true);
 			ps.setBoolean(11, (Boolean) row.get(LLDP));
-			if (ps.executeUpdate() == 0)
+			if (row.get(FMLIMIT) != null)
+				ps.setInt(12, ((Double) row.get(FMLIMIT)).intValue());
+			else
+				ps.setInt(12, -1);
+			if (ps.executeUpdate() == 0) {
 				FVLog.log(LogLevel.WARN, null, "Insertion failed... siliently.");
+				return;
+			}
+			if (row.get(ADMINDOWN) != null)
+				setAdminStatus((String) row.get(SLICE), (Boolean) row.get(ADMINDOWN));
+			else 
+				setAdminStatus((String) row.get(SLICE), true);
 			} catch (SQLException e) {
 				e.printStackTrace();
 		} finally {
@@ -717,5 +832,38 @@ public class SliceImpl implements Slice {
 		}
 		
 	}
+
+	private void processAlter(String alter) {
+		Connection conn = null;
+		PreparedStatement ps = null;
+		try {
+			conn = settings.getConnection();
+			ps = conn.prepareStatement(alter);
+			ps.execute();
+		} catch (SQLException e) {
+			System.err.println("WARN: " + e.getMessage());
+		} finally {
+			close(ps);
+			close(conn);
+		}
+	}
+
+	@Override
+	public void updateDB(int version) {
+		FVLog.log(LogLevel.INFO, null, "Updating Slice database table.");
+		if (version == 0) {
+			processAlter("ALTER TABLE Slice ADD COLUMN " + FMLIMIT + " INT NOT NULL DEFAULT -1");
+			version++;
+		}
+		if (version == 1) {
+			processAlter("ALTER TABLE Slice ADD COLUMN " + ADMINDOWN + " BOOLEAN NOT NULL DEFAULT FALSE");
+			version++;
+		}
+		
+		
+	}
+
 	
+	
+
 }

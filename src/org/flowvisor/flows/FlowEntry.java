@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.flowvisor.config.BracketParse;
 import org.flowvisor.config.Bracketable;
@@ -39,13 +40,15 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 	private static final long serialVersionUID = 1L;
 	public static final long ALL_DPIDS = Long.MIN_VALUE;
 	public static final String ALL_DPIDS_STR = "all_dpids";
-	private static final int DefaultPriority = 32000;
+	public static final int DefaultPriority = 32000;
 	static int UNIQUE_FLOW_ID = -1;
 	protected FVMatch ruleMatch;
+	protected List<Integer> queue_ids = new LinkedList<Integer>();
 	List<OFAction> actionsList;
 	long dpid;
 	int priority;
 	int id;
+	String name;
 	// swap the policy after each defrag for version-ing
 	static DefragmentPolicy CurrentDefragPolicy = DefragmentPolicy.DefragAll;
 
@@ -60,14 +63,23 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 	 * @param actionsList
 	 *            list of actions; empty list implies DROP
 	 */
-	public FlowEntry(long dpid, FVMatch match, int id, int priority,
+	public FlowEntry(String name, long dpid, FVMatch match, int id, int priority,
 			List<OFAction> actionsList) {
 		this.dpid = dpid;
 		this.ruleMatch = match;
 		this.id = id;
 		this.actionsList = actionsList;
 		this.priority = priority;
+		this.name = name;
 	}
+	
+	
+	public FlowEntry(long dpid, FVMatch match, int id, int priority,
+			List<OFAction> actionsList) {
+		this(UUID.randomUUID().toString(), dpid, match, id, priority, actionsList);
+	}
+	
+	
 
 	public FlowEntry(long dpid, FVMatch match, int priority,
 			List<OFAction> actionsList) {
@@ -93,6 +105,12 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 	}
 
 	public FlowEntry() {
+	}
+
+	public FlowEntry(long dpid2, FVMatch match, int priority2,
+			List<OFAction> actions, List<Integer> queueId) {
+		this(dpid2, match, priority2, actions);
+		this.queue_ids = queueId;
 	}
 
 	public synchronized static int getUniqueId() {
@@ -206,6 +224,29 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 
 	public void setActionsList(List<OFAction> actionsList) {
 		this.actionsList = actionsList;
+	}
+	
+	public void setQueueId(List<Integer> qids) {
+		this.ruleMatch.setQueues(qids);
+	}
+	
+	public List<Integer> getQueueId() {
+		if (this.ruleMatch.getQueues() == null) {
+			return new LinkedList<Integer>();
+		} else 
+			return this.ruleMatch.getQueues();
+	}
+	
+	public void setForcedQueue(long qid) {
+		this.ruleMatch.setForcedQueue(qid);
+	}
+	
+	public long getForcedQueue() {
+		return this.ruleMatch.getForcedQueue();
+	}
+	
+	public boolean forcesEnqueue() {
+		return !(this.getForcedQueue() == -1);
 	}
 
 	/**
@@ -437,6 +478,13 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 	public void setId(int id) {
 		this.id = id;
 	}
+	
+	/**
+	 * @return the user-defined name
+	 */
+	public String getName() {
+		return this.name;
+	}
 
 	/*
 	 * (non-Javadoc)
@@ -454,6 +502,8 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 		result = prime * result + priority;
 		result = prime * result
 				+ ((ruleMatch == null) ? 0 : ruleMatch.hashCode());
+		/*if (this.queue_ids != null)
+			result = prime * result + queue_ids.hashCode();*/
 		return result;
 	}
 
@@ -482,6 +532,8 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 			return false;
 		if (priority != other.priority)
 			return false;
+		/*if (queue_ids.equals(other.queue_ids))
+			return false;*/
 		if (ruleMatch == null) {
 			if (other.ruleMatch != null)
 				return false;
@@ -507,10 +559,12 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 	 */
 	@Override
 	public FlowEntry clone() {
-		FlowEntry ret = new FlowEntry(this.dpid, this.ruleMatch.clone(),
-				this.priority, actionsList); // fixme
+		FlowEntry ret = new FlowEntry(this.name, this.dpid, this.ruleMatch.clone(),
+				this.getId(), this.priority, actionsList); // fixme
 		ret.setId(this.id);
 		ret.setActionsList(new LinkedList<OFAction>(actionsList));
+		/*FVLog.log(LogLevel.DEBUG, null, "cloning " + this.queue_ids + " match has " + this.ruleMatch.getQueues());
+		ret.setQueueId(new LinkedList<Integer>(this.ruleMatch.getQueues()));*/
 		return ret;
 	}
 
@@ -534,6 +588,19 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 			}
 		}
 		return false;
+	}
+	
+	public Map<String, Object> toMap() {
+		HashMap<String, Object> map = new LinkedHashMap<String, Object>();
+		if (dpid == ALL_DPIDS)
+			map.put("dpid", ALL_DPIDS_STR);
+		else
+			map.put("dpid", FlowSpaceUtil.dpidToString(dpid));
+		if (this.ruleMatch != null)
+			map.put("match", this.ruleMatch.toMap());
+		map.put("actionsList", actionsList);
+		map.put("priority", String.valueOf(this.priority));
+		return map;
 	}
 
 	@Override
@@ -576,7 +643,8 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 		else
 			throw new IllegalArgumentException(
 					"missing expected key priority, got '" + map + "'");
-
+		
+		
 		int i;
 		// translate dpid
 		if (map.get("dpid").equals(ALL_DPIDS_STR))
@@ -597,4 +665,6 @@ public class FlowEntry implements Comparable<FlowEntry>, Cloneable,
 
 		return this;
 	}
+
+	
 }
